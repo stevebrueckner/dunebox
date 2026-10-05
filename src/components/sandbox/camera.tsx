@@ -1,6 +1,7 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { PIT, SIZE } from "./sim";
 import { useGame } from "./store";
 
 const TMP = new THREE.Vector3();
@@ -162,8 +163,10 @@ export function CameraRig() {
     const pan = 3.4;
     target.current.addScaledVector(FWD, move * pan * d);
     target.current.addScaledVector(RIGHT, strafe * pan * d);
-    target.current.x = THREE.MathUtils.clamp(target.current.x, -2.6, 2.6);
-    target.current.z = THREE.MathUtils.clamp(target.current.z, -2.6, 2.6);
+    const place = useGame.getState().place;
+    const span = place === "beach" ? SIZE / 2 - 1.1 : PIT / 2 - 0.35;
+    target.current.x = THREE.MathUtils.clamp(target.current.x, -span, span);
+    target.current.z = THREE.MathUtils.clamp(target.current.z, -span, span);
     speed.current = Math.hypot(move, strafe) * pan;
 
     if (k.has("Space")) target.current.y = Math.min(1.6, target.current.y + 1.6 * d);

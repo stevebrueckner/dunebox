@@ -1,17 +1,18 @@
-export const COLS = 45;
-export const SIZE = 6;
+export const COLS = 97;
+export const SIZE = 10.4;
+export const PIT = 5.7;
 export const CELL = SIZE / (COLS - 1);
-export const MAX_H = 1.52;
-export const FLOOR = 0.02;
+export const MAX_H = 2.85;
+export const FLOOR = -1.28;
 
 const DEG = Math.PI / 180;
 
 export const LAYERS = [
-  { id: "bed", name: "Bed earth", min: 0, hint: "Packed dark sand. Finds hide here." },
-  { id: "deep", name: "Deep pack", min: 0.16, hint: "Damp, stubborn. Dig slowly." },
-  { id: "damp", name: "Damp gold", min: 0.34, hint: "Best for keeping walls upright." },
-  { id: "loose", name: "Loose dune", min: 0.55, hint: "Dry grains. They slump." },
-  { id: "surface", name: "Surface", min: 0.78, hint: "Sun-bleached top." },
+  { id: "bed", name: "Bed earth", min: -2, hint: "Packed dark sand. Finds hide here." },
+  { id: "deep", name: "Deep pack", min: -0.2, hint: "Damp, stubborn. Dig slowly." },
+  { id: "damp", name: "Damp gold", min: 0.22, hint: "Best for keeping a castle upright." },
+  { id: "loose", name: "Loose dune", min: 0.58, hint: "Dry grains. They slump." },
+  { id: "surface", name: "Surface", min: 0.86, hint: "Sun-bleached top." },
 ] as const;
 
 export type LayerId = (typeof LAYERS)[number]["id"];
@@ -87,6 +88,11 @@ function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+function smoothstep(edge0: number, edge1: number, x: number) {
+  const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
 function mulberry32(seed: number) {
   let a = seed >>> 0;
   return () => {
@@ -141,6 +147,8 @@ export class SandSim {
   private dM: Float32Array;
   private dP: Float32Array;
   private seedValue = 1337;
+  private history: { h: Float32Array; m: Float32Array; p: Float32Array }[] = [];
+  time = 0;
 
   constructor() {
     const n = COLS * COLS;
@@ -227,57 +235,95 @@ export class SandSim {
     return n ? sum / n : 0;
   }
 
-  seed(seed = 1337) {
+  seed(seed = 1337, place: "pit" | "beach" = "pit") {
     this.seedValue = seed;
     const rand = mulberry32(seed);
-    const n = COLS * COLS;
+    const beach = place === "beach";
     for (let iz = 0; iz < COLS; iz++) {
       for (let ix = 0; ix < COLS; ix++) {
         const i = this.idx(ix, iz);
+        const { x, z } = this.cellToWorld(ix, iz);
         const nx = ix / (COLS - 1);
         const nz = iz / (COLS - 1);
         const wx = (nx - 0.5) * 4.2;
         const wz = (nz - 0.5) * 4.2;
-        let h = 0.7;
-        h += (fbm(wx * 1.1 + 2.2, wz * 1.1 + 0.4) - 0.5) * 0.28;
-        h += Math.sin(ix * 0.37) * Math.cos(iz * 0.29) * 0.06;
-        h += (rand() - 0.5) * 0.012;
-        // slight bowl so the lip of the box holds a little extra
-        const edge = Math.max(nx, 1 - nx, nz, 1 - nz);
-        if (edge > 0.92) h += (edge - 0.92) * 0.8;
-        this.heights[i] = clamp(h, 0.45, 1.05);
-        this.moisture[i] = 0.22 + 0.16 * (1 - nx) + (fbm(wx + 9, wz + 3) - 0.5) * 0.08;
+        let h = beach ? 0.62 : 0.72;
+        h += (fbm(wx * 1.1 + 2.2, wz * 1.1 + 0.4) - 0.5) * (beach ? 0.22 : 0.26);
+        h += Math.sin(ix * 0.31) * Math.cos(iz * 0.27) * 0.05;
+        h += (rand() - 0.5) * 0.01;
+        if (!beach) {
+          const outside = Math.max(Math.abs(x), Math.abs(z)) / (PIT / 2);
+          if (outside > 0.98) h = -0.42;
+          else if (outside > 0.9) h += (outside - 0.9) * 1.4;
+        } else {
+          const shore = (z + SIZE / 2) / SIZE;
+          h -= (1 - shore) * 0.38;
+        }
+        this.heights[i] = clamp(h, FLOOR, beach ? 1.15 : 1.2);
+        if (beach) {
+          const wet = clamp((-z - 1.4) / 3.2, 0, 1);
+          this.moisture[i] = clamp(0.08 + wet * 0.78 + (fbm(wx + 9, wz + 3) - 0.5) * 0.05, 0, 1);
+        } else if (Math.max(Math.abs(x), Math.abs(z)) > PIT / 2) {
+          this.moisture[i] = 0.2;
+        } else {
+          this.moisture[i] = 0.28 + 0.12 * (1 - nx) + (fbm(wx + 9, wz + 3) - 0.5) * 0.06;
+        }
         this.packed[i] = 0;
       }
     }
 
-    // Pre-built keep toward the back, slightly damp
-    this.soakDisk(-0.35, -1.55, 1.6, 0.52);
-    this.stampCastle(-0.35, -1.55, true);
+    if (!beach) {
+      this.soakDisk(-0.35, -1.35, 1.5, 0.48);
+      this.stampCastle(-0.35, -1.35, true);
+      this.dig(-0.15, 1.55, 0.5, 0.5, false);
+      this.water(-0.15, 1.55, 0.65, 0.2);
+    }
 
-    // Tutorial hole up front with a shallow find
-    this.dig(-0.2, 1.7, 0.55, 0.55, false);
-    this.water(-0.2, 1.7, 0.7, 0.25);
-
+    const count = TREASURES.length;
     this.buried = TREASURES.map((t, k) => {
-      const ang = (k / TREASURES.length) * Math.PI * 2 + 0.4;
-      const rad = 0.7 + (k % 3) * 0.55 + rand() * 0.35;
-      let x = Math.cos(ang) * rad;
-      let z = Math.sin(ang) * rad * 0.85 - 0.15;
-      if (k === 0) {
-        x = -0.2;
-        z = 1.7;
+      const ang = (k / count) * Math.PI * 2 + 0.35;
+      const span = beach ? 3.6 : 1.6;
+      let x = Math.cos(ang) * (0.6 + (k % 4) * 0.45) * (beach ? 1.15 : 0.7);
+      let z = Math.sin(ang) * span * 0.45 + (beach ? 0.8 : 0);
+      if (!beach && k === 0) {
+        x = -0.15;
+        z = 1.55;
+      }
+      if (beach) {
+        x = clamp((rand() - 0.5) * 7.2, -4.2, 4.2);
+        z = 0.4 + rand() * 3.4;
       }
       const surface = this.heightAt(x, z);
-      const depth =
-        k === 0
-          ? Math.max(FLOOR + 0.08, surface - 0.18)
-          : FLOOR + 0.08 + rand() * 0.22;
+      const depth = beach
+        ? clamp(surface - (0.35 + rand() * 0.9), FLOOR + 0.08, surface - 0.12)
+        : k === 0
+          ? Math.max(FLOOR + 0.08, surface - 0.22)
+          : FLOOR + 0.15 + rand() * 0.35;
       return { id: `t-${k}`, kind: t.kind, name: t.name, x, z, depth };
     });
 
+    this.history = [];
     this.dirty = true;
     this.crumbles.length = 0;
+  }
+
+  pushHistory() {
+    if (this.history.length > 14) this.history.shift();
+    this.history.push({
+      h: this.heights.slice(),
+      m: this.moisture.slice(),
+      p: this.packed.slice(),
+    });
+  }
+
+  undo() {
+    const snap = this.history.pop();
+    if (!snap) return false;
+    this.heights.set(snap.h);
+    this.moisture.set(snap.m);
+    this.packed.set(snap.p);
+    this.dirty = true;
+    return true;
   }
 
   soakDisk(x: number, z: number, radius: number, moisture: number) {
@@ -286,75 +332,38 @@ export class SandSim {
     });
   }
 
-  private raisePack(ix: number, iz: number, h: number, packed: number) {
-    if (!this.inBounds(ix, iz)) return;
-    const i = this.idx(ix, iz);
-    this.heights[i] = clamp(Math.max(this.heights[i], h), FLOOR, MAX_H);
-    this.packed[i] = Math.max(this.packed[i], packed);
-    this.moisture[i] = clamp(this.moisture[i], 0.28, 0.72);
-  }
-
-  stampCastle(x: number, z: number, force = false): { quality: "dry" | "good" | "wet"; moisture: number } {
+  stampCastle(x: number, z: number, force = false): { quality: "dry" | "good" | "wet"; moisture: number; stacked: boolean } {
+    const base = this.heightAt(x, z);
     const { ix: fx, iz: fz } = this.worldToCell(x, z);
-    const cx = Math.round(fx);
-    const cz = Math.round(fz);
-    const m = this.avgMoisture(cx, cz, 6);
-    let packedAmt = 0.2;
-    let hBoost = 0.18;
+    const m = this.avgMoisture(Math.round(fx), Math.round(fz), 6);
+    let lift = 1;
+    let packAmt = 0.97;
     let quality: "dry" | "good" | "wet" = "good";
-    if (m < 0.2 && !force) {
-      packedAmt = 0.18;
-      hBoost = 0.2;
+    if (!force && m < 0.14) {
+      lift = 0.42;
+      packAmt = 0.2;
       quality = "dry";
-    } else if (m > 0.76 && !force) {
-      packedAmt = 0.22;
-      hBoost = 0.12;
-      quality = "wet";
-    } else {
-      packedAmt = force ? 0.92 : 0.95;
-      hBoost = 0.42;
-      quality = "good";
     }
-
-    const wallH = 0.78 + hBoost * 0.55;
-    const towerH = 0.92 + hBoost;
-    const keepH = 0.86 + hBoost * 0.8;
-
-    for (let d = -4; d <= 4; d++) {
-      for (const s of [-4, 4]) {
-        this.raisePack(cx + d, cz + s, wallH, packedAmt);
-        this.raisePack(cx + s, cz + d, wallH, packedAmt);
-      }
-    }
-    // gate on +Z
-    for (let d = -1; d <= 1; d++) {
-      const i = this.idx(cx + d, cz + 4);
-      if (this.inBounds(cx + d, cz + 4)) {
-        this.heights[i] = Math.min(this.heights[i], 0.62);
-        this.packed[i] *= 0.2;
-      }
-    }
-    const towers: [number, number][] = [
-      [-4, -4],
-      [4, -4],
-      [-4, 4],
-      [4, 4],
-    ];
-    for (const [tx, tz] of towers) {
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dz = -1; dz <= 1; dz++) {
-          const extra = dx === 0 && dz === 0 ? 0.08 : 0;
-          this.raisePack(cx + tx + dx, cz + tz + dz, towerH + extra, packedAmt);
-        }
-      }
-    }
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        this.raisePack(cx + dx, cz + dz, keepH, packedAmt);
-      }
-    }
+    const stacked = base > 1.05;
+    const R = 0.46;
+    const body = 0.4 * lift;
+    this.brush(x, z, R + 0.06, (i, _w, ix, iz) => {
+      const { x: wx, z: wz } = this.cellToWorld(ix, iz);
+      const dx = wx - x;
+      const dz = wz - z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > R) return;
+      const ang = Math.atan2(dz, dx);
+      const side = smoothstep(R - 0.1, R, dist);
+      let h = body * (1 - side);
+      if (dist > 0.18 && dist < 0.36 && Math.cos(ang * 8) > 0.15) h += 0.12 * lift;
+      const target = base + h;
+      this.heights[i] = clamp(Math.max(this.heights[i], target), FLOOR, MAX_H);
+      this.packed[i] = Math.max(this.packed[i], packAmt);
+      if (quality === "good") this.moisture[i] = clamp(Math.max(this.moisture[i], 0.45), 0, 0.8);
+    });
     this.dirty = true;
-    return { quality, moisture: m };
+    return { quality, moisture: m, stacked };
   }
 
   brush(
@@ -412,7 +421,7 @@ export class SandSim {
     this.brush(x, z, radius, (i, w, ix, iz) => {
       const layer = layerAt(this.heights[i]);
       const resist =
-        layer.id === "bed" ? 0.28 : layer.id === "deep" ? 0.48 : layer.id === "damp" ? 0.78 : 1;
+        layer.id === "bed" ? 0.42 : layer.id === "deep" ? 0.62 : layer.id === "damp" ? 0.85 : 1;
       const room = this.heights[i] - FLOOR;
       const take = Math.min(room, amount * w * resist);
       this.heights[i] -= take;
@@ -471,16 +480,26 @@ export class SandSim {
     return crushed;
   }
 
-  step(dt: number, soak: number) {
+  step(dt: number, soak: number, place: "pit" | "beach" = "pit") {
     const n = COLS * COLS;
+    this.time += dt;
     this.dH.fill(0);
     this.dM.fill(0);
     this.dP.fill(0);
     const { heights: h, moisture: m, packed: p } = this;
+    const halfPit = PIT / 2 - CELL;
+
+    const pinned = (ix: number, iz: number) => {
+      if (place !== "pit") return false;
+      const { x, z } = this.cellToWorld(ix, iz);
+      return Math.abs(x) > halfPit || Math.abs(z) > halfPit;
+    };
 
     for (let iz = 0; iz < COLS; iz++) {
       for (let ix = 0; ix < COLS; ix++) {
+        if (pinned(ix, iz)) continue;
         const i = this.idx(ix, iz);
+        if (p[i] > 0.82) continue;
         const repose = reposeAngle(m[i], p[i]);
         const maxSlope = Math.tan(repose);
         const flow =
@@ -493,7 +512,7 @@ export class SandSim {
         for (const [dx, dz, diag] of DIRS) {
           const nx = ix + dx;
           const nz = iz + dz;
-          if (!this.inBounds(nx, nz)) continue;
+          if (!this.inBounds(nx, nz) || pinned(nx, nz)) continue;
           const j = this.idx(nx, nz);
           const dist = CELL * diag;
           const dh = h[i] - h[j];
@@ -526,17 +545,23 @@ export class SandSim {
           }
         }
 
-        // soak toward the pit-wide water content + slight evaporation
-        const target = soak * 0.72;
-        this.dM[i] += (target - m[i]) * 0.018 * dt * 60;
-        this.dM[i] -= m[i] * 0.004 * dt * 60;
+        const target = place === "beach" ? soak * 0.35 : soak * 0.72;
+        this.dM[i] += (target - m[i]) * 0.012 * dt * 60;
+        this.dM[i] -= m[i] * 0.003 * dt * 60;
+
+        if (place === "beach") {
+          const { z } = this.cellToWorld(ix, iz);
+          const shore = -2.05 + Math.sin(this.time * 0.7 + ix * 0.08) * 0.42;
+          if (z < shore) this.dM[i] += (0.94 - m[i]) * 0.09;
+          else if (z < shore + 1.4) this.dM[i] += (0.45 - m[i]) * 0.02;
+        }
       }
     }
 
     for (let i = 0; i < n; i++) {
-      h[i] = clamp(h[i] + this.dH[i], FLOOR, MAX_H);
+      if (p[i] < 0.85) h[i] = clamp(h[i] + this.dH[i], FLOOR, MAX_H);
       m[i] = clamp(m[i] + this.dM[i], 0, 1);
-      p[i] = clamp(p[i] + this.dP[i], 0, 1);
+      if (p[i] < 0.85) p[i] = clamp(p[i] + this.dP[i], 0, 1);
     }
 
     // moisture diffusion (small)
@@ -566,14 +591,18 @@ export class SandSim {
     let r: number;
     let g: number;
     let b: number;
-    if (h < 0.16) {
-      r = 0.3;
-      g = 0.18;
+    if (h < -0.55) {
+      r = 0.22;
+      g = 0.12;
+      b = 0.07;
+    } else if (h < -0.05) {
+      r = 0.36;
+      g = 0.2;
       b = 0.1;
-    } else if (h < 0.34) {
-      r = 0.48;
-      g = 0.3;
-      b = 0.14;
+    } else if (h < 0.28) {
+      r = 0.55;
+      g = 0.34;
+      b = 0.16;
     } else if (h < 0.55) {
       r = 0.72;
       g = 0.5;
@@ -587,7 +616,7 @@ export class SandSim {
       g = 0.86;
       b = 0.64;
     }
-    const n = (hash(ix, iz) - 0.5) * 0.07;
+    const n = (hash(ix, iz) - 0.5) * 0.02;
     r += n;
     g += n * 0.85;
     b += n * 0.55;

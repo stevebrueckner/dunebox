@@ -54,7 +54,7 @@ export default function SandboxApp() {
         shadows
         dpr={[1, 1.5]}
         camera={{ fov: 42, near: 0.12, far: 80, position: [4.4, 5.8, 6.6] }}
-        gl={{ antialias: true, powerPreference: "high-performance" }}
+        gl={{ antialias: true, powerPreference: "high-performance", preserveDrawingBuffer: true }}
         onCreated={({ gl }) => {
           gl.shadowMap.enabled = true;
           gl.shadowMap.type = THREE.PCFShadowMap;

@@ -10,11 +10,20 @@ function ensure() {
   ctx = new AC({ latencyHint: "interactive" });
   master = ctx.createGain();
   sfx = ctx.createGain();
-  sfx.gain.value = 0.7;
+  sfx.gain.value = 0.85;
   sfx.connect(master);
   master.connect(ctx.destination);
-  const data = new Float32Array(ctx.sampleRate * 1);
-  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const data = new Float32Array(ctx.sampleRate * 2);
+  let b0 = 0;
+  let b1 = 0;
+  let b2 = 0;
+  for (let i = 0; i < data.length; i++) {
+    const white = Math.random() * 2 - 1;
+    b0 = 0.997 * b0 + 0.003 * white;
+    b1 = 0.96 * b1 + 0.04 * white;
+    b2 = 0.7 * b2 + 0.3 * white;
+    data[i] = b0 * 1.4 + b1 * 0.55 + (white - b2) * 0.25;
+  }
   noise = ctx.createBuffer(1, data.length, ctx.sampleRate);
   noise.getChannelData(0).set(data);
   return ctx;
@@ -37,7 +46,7 @@ function envGain(start: number, peak: number, attack: number, decay: number) {
   if (!ctx || !sfx) return null;
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.0001, start);
-  g.gain.exponentialRampToValueAtTime(peak, start + attack);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), start + attack);
   g.gain.exponentialRampToValueAtTime(0.0001, start + attack + decay);
   g.connect(sfx);
   return g;
@@ -52,12 +61,44 @@ function noiseSrc(rate = 1) {
   return src;
 }
 
-function tone(freq: number, type: OscillatorType, start: number, dur: number, peak: number) {
+function grain(
+  start: number,
+  rate: number,
+  filter: BiquadFilterType,
+  freq: number,
+  q: number,
+  peak: number,
+  attack: number,
+  decay: number,
+) {
+  const ac = ctx;
+  if (!ac) return;
+  const src = noiseSrc(rate);
+  const g = envGain(start, peak, attack, decay);
+  if (!src || !g) return;
+  const bp = ac.createBiquadFilter();
+  bp.type = filter;
+  bp.frequency.setValueAtTime(freq, start);
+  bp.Q.value = q;
+  src.connect(bp);
+  bp.connect(g);
+  const stop = start + attack + decay + 0.02;
+  src.start(start);
+  src.stop(stop);
+  src.onended = () => {
+    src.disconnect();
+    bp.disconnect();
+    g.disconnect();
+  };
+}
+
+function body(freq: number, start: number, dur: number, peak: number) {
   if (!ctx || !sfx) return;
   const osc = ctx.createOscillator();
-  osc.type = type;
+  osc.type = "sine";
   osc.frequency.setValueAtTime(freq, start);
-  const g = envGain(start, peak, 0.008, dur);
+  osc.frequency.exponentialRampToValueAtTime(Math.max(28, freq * 0.55), start + dur);
+  const g = envGain(start, peak, 0.012, dur);
   if (!g) return;
   osc.connect(g);
   osc.start(start);
@@ -69,122 +110,61 @@ function tone(freq: number, type: OscillatorType, start: number, dur: number, pe
 }
 
 export function playSfx(
-  kind: "scoop" | "dump" | "dig" | "water" | "smash" | "castle" | "find" | "drop" | "wood",
+  kind: "scoop" | "dump" | "dig" | "water" | "smash" | "castle" | "find" | "drop" | "wood" | "lift" | "grab",
 ) {
   if (muted) return;
   const ac = ensure();
   if (ac.state === "suspended") return;
   const t = ac.currentTime;
-  const jitter = 0.92 + Math.random() * 0.16;
+  const jitter = 0.94 + Math.random() * 0.1;
 
-  if (kind === "scoop" || kind === "dig") {
-    const src = noiseSrc(0.7 * jitter);
-    if (!src) return;
-    const bp = ac.createBiquadFilter();
-    bp.type = "bandpass";
-    bp.frequency.value = kind === "dig" ? 420 : 680;
-    bp.Q.value = 0.7;
-    const g = envGain(t, 0.18, 0.01, 0.16);
-    if (!g) return;
-    src.connect(bp);
-    bp.connect(g);
-    src.start(t);
-    src.stop(t + 0.2);
-    src.onended = () => {
-      src.disconnect();
-      bp.disconnect();
-      g.disconnect();
-    };
+  if (kind === "scoop") {
+    grain(t, 0.42 * jitter, "lowpass", 720, 0.6, 0.11, 0.04, 0.22);
+    grain(t, 1.15 * jitter, "bandpass", 1900, 0.8, 0.035, 0.01, 0.12);
     return;
   }
-
+  if (kind === "dig") {
+    grain(t, 0.33 * jitter, "bandpass", 280, 0.55, 0.16, 0.02, 0.16);
+    grain(t + 0.02, 0.7, "highpass", 1400, 0.4, 0.03, 0.01, 0.08);
+    return;
+  }
   if (kind === "dump") {
-    const src = noiseSrc(0.45 * jitter);
-    if (!src) return;
-    const lp = ac.createBiquadFilter();
-    lp.type = "lowpass";
-    lp.frequency.value = 900;
-    const g = envGain(t, 0.28, 0.02, 0.28);
-    if (!g) return;
-    src.connect(lp);
-    lp.connect(g);
-    src.start(t);
-    src.stop(t + 0.32);
-    src.onended = () => {
-      src.disconnect();
-      lp.disconnect();
-      g.disconnect();
-    };
+    grain(t, 0.28 * jitter, "lowpass", 540, 0.5, 0.2, 0.03, 0.38);
+    grain(t + 0.04, 0.9, "bandpass", 1100, 0.6, 0.05, 0.02, 0.2);
     return;
   }
-
   if (kind === "water") {
-    const src = noiseSrc(1.4 * jitter);
-    if (!src) return;
-    const bp = ac.createBiquadFilter();
-    bp.type = "bandpass";
-    bp.frequency.value = 1800;
-    bp.Q.value = 1.2;
-    const g = envGain(t, 0.12, 0.005, 0.12);
-    if (!g) return;
-    src.connect(bp);
-    bp.connect(g);
-    src.start(t);
-    src.stop(t + 0.14);
-    src.onended = () => {
-      src.disconnect();
-      bp.disconnect();
-      g.disconnect();
-    };
+    grain(t, 1.35 * jitter, "bandpass", 2600, 0.45, 0.07, 0.02, 0.28);
+    grain(t, 0.6, "lowpass", 900, 0.4, 0.04, 0.04, 0.3);
     return;
   }
-
   if (kind === "smash") {
-    tone(90 * jitter, "sine", t, 0.22, 0.28);
-    const src = noiseSrc(0.5);
-    if (!src) return;
-    const g = envGain(t, 0.32, 0.005, 0.25);
-    if (!g) return;
-    src.connect(g);
-    src.start(t);
-    src.stop(t + 0.28);
-    src.onended = () => {
-      src.disconnect();
-      g.disconnect();
-    };
+    body(52 * jitter, t, 0.2, 0.22);
+    grain(t, 0.22, "lowpass", 180, 0.7, 0.28, 0.004, 0.18);
     return;
   }
-
   if (kind === "castle") {
-    tone(220 * jitter, "triangle", t, 0.12, 0.12);
-    tone(330 * jitter, "triangle", t + 0.04, 0.14, 0.08);
+    grain(t, 0.55 * jitter, "lowpass", 480, 0.8, 0.12, 0.006, 0.1);
+    body(96 * jitter, t, 0.07, 0.05);
     return;
   }
-
+  if (kind === "lift") {
+    grain(t, 0.8 * jitter, "bandpass", 900, 0.7, 0.05, 0.01, 0.09);
+    return;
+  }
+  if (kind === "grab") {
+    grain(t, 1.1, "bandpass", 700, 1.2, 0.06, 0.004, 0.05);
+    return;
+  }
   if (kind === "find") {
-    tone(523, "sine", t, 0.16, 0.14);
-    tone(659, "sine", t + 0.08, 0.18, 0.12);
-    tone(784, "sine", t + 0.16, 0.28, 0.1);
+    body(523, t, 0.14, 0.06);
+    body(659, t + 0.07, 0.16, 0.05);
+    body(784, t + 0.14, 0.22, 0.04);
     return;
   }
-
   if (kind === "drop") {
-    tone(180 * jitter, "triangle", t, 0.1, 0.1);
+    grain(t, 0.4 * jitter, "lowpass", 640, 0.6, 0.1, 0.008, 0.12);
     return;
   }
-
-  if (kind === "wood") {
-    tone(140 * jitter, "sine", t, 0.08, 0.12);
-    const src = noiseSrc(0.9);
-    if (!src) return;
-    const g = envGain(t, 0.08, 0.002, 0.06);
-    if (!g) return;
-    src.connect(g);
-    src.start(t);
-    src.stop(t + 0.08);
-    src.onended = () => {
-      src.disconnect();
-      g.disconnect();
-    };
-  }
+  grain(t, 0.3, "lowpass", 220, 0.5, 0.08, 0.004, 0.08);
 }

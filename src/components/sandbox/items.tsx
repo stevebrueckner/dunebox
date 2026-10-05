@@ -2,10 +2,11 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { playSfx } from "./audio";
-import { SIZE, SandSim, type TreasureKind } from "./sim";
+import { BeachBall, Pail, Shell, Spade, Starfish, Umbrella } from "./props";
+import { PIT, SIZE, SandSim, type TreasureKind } from "./sim";
 import { useGame } from "./store";
 
-export type ToyKind = TreasureKind | "bucket" | "shovel" | "ball";
+export type ToyKind = TreasureKind | "bucket" | "shovel" | "ball" | "umbrella";
 export let meshPickedAt = 0;
 
 export type ToySpec = {
@@ -24,46 +25,25 @@ export type ToySpec = {
   radius: number;
 };
 
-const HALF = SIZE / 2 - 0.16;
-
 function meshFor(kind: ToyKind) {
   switch (kind) {
     case "shell":
-      return (
-        <group rotation={[-0.4, 0.3, 0.2]}>
-          <mesh castShadow>
-            <sphereGeometry args={[0.11, 16, 12]} />
-            <meshStandardMaterial color="#f0d0b4" roughness={0.45} />
-          </mesh>
-          <mesh position={[0.02, 0.02, 0.04]} castShadow>
-            <torusGeometry args={[0.07, 0.028, 8, 16]} />
-            <meshStandardMaterial color="#e8c4a4" roughness={0.4} />
-          </mesh>
-        </group>
-      );
+      return <Shell />;
     case "star":
-      return (
-        <group rotation={[-Math.PI / 2, 0, 0]}>
-          {Array.from({ length: 5 }).map((_, i) => {
-            const a = (i / 5) * Math.PI * 2;
-            return (
-              <mesh key={i} position={[Math.cos(a) * 0.08, Math.sin(a) * 0.08, 0]} castShadow>
-                <coneGeometry args={[0.045, 0.16, 5]} />
-                <meshStandardMaterial color="#c45c26" roughness={0.55} />
-              </mesh>
-            );
-          })}
-          <mesh castShadow>
-            <sphereGeometry args={[0.07, 12, 10]} />
-            <meshStandardMaterial color="#d06a4a" roughness={0.5} />
-          </mesh>
-        </group>
-      );
+      return <Starfish />;
     case "marble":
       return (
         <mesh castShadow>
           <sphereGeometry args={[0.09, 20, 16]} />
-          <meshStandardMaterial color="#3f7a74" roughness={0.12} metalness={0.15} />
+          <meshPhysicalMaterial
+            color="#7ec8c2"
+            roughness={0.05}
+            metalness={0}
+            transmission={0.92}
+            thickness={0.2}
+            ior={1.5}
+            envMapIntensity={1.2}
+          />
         </mesh>
       );
     case "car":
@@ -138,41 +118,20 @@ function meshFor(kind: ToyKind) {
       );
     case "bucket":
       return (
-        <group>
-          <mesh castShadow>
-            <cylinderGeometry args={[0.11, 0.09, 0.16, 14, 1, true]} />
-            <meshStandardMaterial color="#3f7a74" side={THREE.DoubleSide} roughness={0.45} />
-          </mesh>
-          <mesh position={[0, -0.08, 0]} rotation={[Math.PI / 2, 0, 0]}>
-            <circleGeometry args={[0.09, 14]} />
-            <meshStandardMaterial color="#2f5e59" />
-          </mesh>
-          <mesh position={[0, 0.08, 0]} rotation={[0, 0, Math.PI / 2]}>
-            <torusGeometry args={[0.1, 0.012, 6, 16, Math.PI]} />
-            <meshStandardMaterial color="#c45c26" />
-          </mesh>
+        <group scale={0.85}>
+          <Pail />
         </group>
       );
     case "shovel":
       return (
-        <group rotation={[0, 0, 0.5]}>
-          <mesh position={[0, 0.12, 0]} castShadow>
-            <cylinderGeometry args={[0.015, 0.015, 0.28, 8]} />
-            <meshStandardMaterial color="#7a5133" />
-          </mesh>
-          <mesh position={[0, -0.06, 0]} castShadow>
-            <boxGeometry args={[0.1, 0.12, 0.02]} />
-            <meshStandardMaterial color="#3f7a74" metalness={0.2} roughness={0.4} />
-          </mesh>
+        <group scale={0.95} rotation={[Math.PI / 2, 0.6, 0]} position={[0, 0.05, 0]}>
+          <Spade />
         </group>
       );
     case "ball":
-      return (
-        <mesh castShadow>
-          <sphereGeometry args={[0.1, 16, 12]} />
-          <meshStandardMaterial color="#c45c26" roughness={0.4} />
-        </mesh>
-      );
+      return <BeachBall />;
+    case "umbrella":
+      return <Umbrella />;
     default:
       return (
         <mesh castShadow>
@@ -223,18 +182,19 @@ function ToyBody({
     s.y += s.vy * d;
     s.z += s.vz * d;
 
-    if (s.x > HALF) {
-      s.x = HALF;
+    const limit = useGame.getState().place === "beach" ? SIZE / 2 - 0.35 : PIT / 2 - 0.22;
+    if (s.x > limit) {
+      s.x = limit;
       s.vx *= -0.25;
-    } else if (s.x < -HALF) {
-      s.x = -HALF;
+    } else if (s.x < -limit) {
+      s.x = -limit;
       s.vx *= -0.25;
     }
-    if (s.z > HALF) {
-      s.z = HALF;
+    if (s.z > limit) {
+      s.z = limit;
       s.vz *= -0.25;
-    } else if (s.z < -HALF) {
-      s.z = -HALF;
+    } else if (s.z < -limit) {
+      s.z = -limit;
       s.vz *= -0.25;
     }
 
@@ -285,6 +245,7 @@ function ToyBody({
             playSfx("drop");
           } else {
             st.setHeldId(spec.id);
+            playSfx("grab");
           }
         }}
       >
@@ -297,13 +258,21 @@ function ToyBody({
 
 export function Toys({ sim, grabPoint }: { sim: SandSim; grabPoint: React.MutableRefObject<THREE.Vector3> }) {
   const resetNonce = useGame((s) => s.resetNonce);
+  const place = useGame((s) => s.place);
 
   const initial = useMemo(() => {
     const list: ToySpec[] = [
-      { id: "bucket", kind: "bucket", name: "Pail", x: 1.4, y: 1.2, z: 0.9, vx: 0, vy: 0, vz: 0, buried: false, depth: 0, treasure: false, radius: 0.12 },
-      { id: "shovel", kind: "shovel", name: "Shovel", x: 1.15, y: 1.2, z: 1.15, vx: 0, vy: 0, vz: 0, buried: false, depth: 0, treasure: false, radius: 0.1 },
-      { id: "ball", kind: "ball", name: "Beach ball", x: -1.5, y: 1.4, z: 0.4, vx: 0.4, vy: 0, vz: 0.15, buried: false, depth: 0, treasure: false, radius: 0.1 },
+      { id: "bucket", kind: "bucket", name: "Pail", x: 1.2, y: 1.2, z: 0.8, vx: 0, vy: 0, vz: 0, buried: false, depth: 0, treasure: false, radius: 0.12 },
+      { id: "shovel", kind: "shovel", name: "Shovel", x: 1.0, y: 1.2, z: 1.05, vx: 0, vy: 0, vz: 0, buried: false, depth: 0, treasure: false, radius: 0.1 },
+      { id: "ball", kind: "ball", name: "Beach ball", x: -1.3, y: 1.4, z: 0.35, vx: 0.4, vy: 0, vz: 0.15, buried: false, depth: 0, treasure: false, radius: 0.1 },
     ];
+    if (place === "beach") {
+      list.push(
+        { id: "ball2", kind: "ball", name: "Stripe ball", x: 2.4, y: 1.3, z: 1.6, vx: 0, vy: 0, vz: 0, buried: false, depth: 0, treasure: false, radius: 0.11 },
+        { id: "umbrella", kind: "umbrella", name: "Umbrella", x: -2.6, y: 1.2, z: 2.2, vx: 0, vy: 0, vz: 0, buried: false, depth: 0, treasure: false, radius: 0.16 },
+        { id: "pail2", kind: "bucket", name: "Spare pail", x: 3.1, y: 1.2, z: 0.4, vx: 0, vy: 0, vz: 0, buried: false, depth: 0, treasure: false, radius: 0.12 },
+      );
+    }
     for (const b of sim.buried) {
       list.push({
         id: b.id,
@@ -322,7 +291,7 @@ export function Toys({ sim, grabPoint }: { sim: SandSim; grabPoint: React.Mutabl
       });
     }
     return list;
-  }, [sim, resetNonce]);
+  }, [sim, resetNonce, place]);
 
   const [toys, setToys] = useState<ToySpec[]>(initial);
   const toysRef = useRef(toys);

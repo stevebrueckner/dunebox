@@ -21,43 +21,33 @@ function canvasTexture(
 
 export function makeSandAlbedo() {
   return canvasTexture(
-    256,
+    512,
     (g, s) => {
-      const img = g.createImageData(s, s);
-      for (let y = 0; y < s; y++) {
-        for (let x = 0; x < s; x++) {
-          const i = (y * s + x) * 4;
-          const n = 198 + ((x * 13 + y * 7) % 37) + Math.random() * 18;
-          img.data[i] = n;
-          img.data[i + 1] = n * 0.84;
-          img.data[i + 2] = n * 0.58;
-          img.data[i + 3] = 255;
-        }
+      g.fillStyle = "#e7c892";
+      g.fillRect(0, 0, s, s);
+      for (let i = 0; i < 1800; i++) {
+        const v = 210 + Math.random() * 35;
+        g.fillStyle = `rgba(${v},${Math.round(v * 0.84)},${Math.round(v * 0.58)},0.08)`;
+        g.fillRect(Math.random() * s, Math.random() * s, 1, 1);
       }
-      g.putImageData(img, 0, 0);
     },
-    7,
+    6,
   );
 }
 
 export function makeSandBump() {
   const tex = canvasTexture(
-    256,
+    512,
     (g, s) => {
-      const img = g.createImageData(s, s);
-      for (let y = 0; y < s; y++) {
-        for (let x = 0; x < s; x++) {
-          const i = (y * s + x) * 4;
-          const v = 110 + Math.random() * 90;
-          img.data[i] = v;
-          img.data[i + 1] = v;
-          img.data[i + 2] = v;
-          img.data[i + 3] = 255;
-        }
+      g.fillStyle = "#808080";
+      g.fillRect(0, 0, s, s);
+      for (let i = 0; i < 800; i++) {
+        const v = 120 + Math.random() * 16;
+        g.fillStyle = `rgba(${v},${v},${v},0.25)`;
+        g.fillRect(Math.random() * s, Math.random() * s, 1, 1);
       }
-      g.putImageData(img, 0, 0);
     },
-    9,
+    6,
   );
   tex.colorSpace = THREE.NoColorSpace;
   return tex;
@@ -65,26 +55,28 @@ export function makeSandBump() {
 
 export function makeWoodAlbedo() {
   return canvasTexture(
-    256,
+    512,
     (g, s) => {
-      g.fillStyle = "#6b4428";
+      g.fillStyle = "#8a5a34";
       g.fillRect(0, 0, s, s);
-      for (let x = 0; x < s; x++) {
-        const wobble = Math.sin(x * 0.07) * 8;
-        g.strokeStyle = `rgba(40, 22, 10, ${0.12 + (x % 17) * 0.01})`;
-        g.beginPath();
-        g.moveTo(x, 0);
-        g.lineTo(x + wobble, s);
-        g.stroke();
-      }
-      for (let i = 0; i < 18; i++) {
-        g.fillStyle = `rgba(90, 50, 24, ${0.15 + Math.random() * 0.2})`;
-        g.beginPath();
-        g.ellipse(Math.random() * s, Math.random() * s, 6 + Math.random() * 10, 3, 0, 0, Math.PI * 2);
-        g.fill();
+      const plank = s / 4;
+      for (let p = 0; p < 4; p++) {
+        const y0 = p * plank;
+        g.fillStyle = p % 2 ? "#7a4e2c" : "#9a6840";
+        g.fillRect(0, y0, s, plank - 2);
+        for (let i = 0; i < 14; i++) {
+          const y = y0 + 6 + i * (plank / 16);
+          g.strokeStyle = `rgba(62, 32, 14, ${0.08 + (i % 3) * 0.04})`;
+          g.beginPath();
+          g.moveTo(0, y);
+          g.bezierCurveTo(s * 0.3, y + Math.sin(p + i) * 4, s * 0.7, y - 3, s, y + 2);
+          g.stroke();
+        }
+        g.fillStyle = "rgba(40, 22, 10, 0.35)";
+        g.fillRect(0, y0 + plank - 3, s, 2);
       }
     },
-    2,
+    1.5,
   );
 }
 
